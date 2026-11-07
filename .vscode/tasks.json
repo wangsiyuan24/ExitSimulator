@@ -1,0 +1,25 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "process",
+            "label": "运行 ExitSimulator",
+            "command": "python3",
+            "args": [
+                "${workspaceFolder}/ExitSimulator.py"
+            ],
+            "windows": {
+                "command": "python"
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "直接运行跨平台 Python 版本的 ExitSimulator。"
+        }
+    ]
+}
