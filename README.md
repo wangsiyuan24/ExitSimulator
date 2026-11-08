@@ -85,8 +85,3 @@ Contributions involving code, documentation, or rigorous research into exit beha
 
 If the button successfully exits the program, this is generally not considered a defect.
 
-## License
-
-ExitSimulator is released under the [Zero-Clause BSD License](LICENSE). You may use, copy, modify, and distribute the software for any purpose, with or without a fee.
-
-Copyright (c) 2026 Wang Siyuan. See the [`LICENSE`](LICENSE) file for the complete license text and warranty disclaimer.
