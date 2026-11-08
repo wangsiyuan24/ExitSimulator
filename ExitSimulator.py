@@ -1,192 +1,158 @@
-"""ExitSimulator: a dependency-free cross-platform exit window."""
+"""ExitSimulator: a tiny exit window for Windows and macOS."""
 
 from __future__ import annotations
 
+import ctypes
 import shutil
 import subprocess
 import sys
+
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except ImportError as error:
+    print(
+        "ExitSimulator requires Python 3 with the standard Tkinter module.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1) from error
 
 
 APP_NAME = "ExitSimulator"
 INSTRUCTION = "Click the button below to exit."
 MESSAGE = "ExitSimulator is eating a hamburger now and will exit immediately."
-DEVNULL = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+WINDOW_WIDTH = 300
+WINDOW_HEIGHT = 150
 
 
-def windows_powershell(script: str, *, wait: bool) -> int:
-    command = ["powershell", "-NoProfile", "-Command", script]
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    if wait:
-        return subprocess.run(command, creationflags=flags, check=False).returncode
-    subprocess.Popen(command, creationflags=flags, **DEVNULL)
+def enable_windows_dpi_awareness() -> None:
+    if sys.platform != "win32":
+        return
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except (AttributeError, OSError):
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except (AttributeError, OSError):
+            pass
+
+
+def configure_system_theme(window: tk.Tk) -> ttk.Style:
+    style = ttk.Style(window)
+    themes = set(style.theme_names())
+    preferred = ("vista", "xpnative", "winnative") if sys.platform == "win32" else ("aqua",)
+
+    for theme in preferred:
+        if theme in themes:
+            style.theme_use(theme)
+            break
+
+    return style
+
+
+def center_window(window: tk.Tk) -> None:
+    window.update_idletasks()
+    x = max(0, (window.winfo_screenwidth() - WINDOW_WIDTH) // 2)
+    y = max(0, (window.winfo_screenheight() - WINDOW_HEIGHT) // 2)
+    window.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{x}+{y}")
+
+
+def windows_notification_command() -> list[str]:
+    powershell = shutil.which("powershell") or shutil.which("powershell.exe")
+    if powershell is None:
+        raise RuntimeError("Windows PowerShell is required to show the system notification.")
+
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "$n=New-Object System.Windows.Forms.NotifyIcon;"
+        "$n.Icon=[System.Drawing.SystemIcons]::Error;"
+        "$n.BalloonTipTitle='ExitSimulator';"
+        "$n.BalloonTipText='ExitSimulator is eating a hamburger now and will exit immediately.';"
+        "$n.BalloonTipIcon='Error';"
+        "$n.Visible=$true;"
+        "$n.ShowBalloonTip(4000);"
+        "Start-Sleep -Seconds 4;"
+        "$n.Dispose()"
+    )
+    return [powershell, "-NoProfile", "-Command", script]
+
+
+def macos_notification_command() -> list[str]:
+    osascript = "/usr/bin/osascript"
+    script = (
+        "const app=Application.currentApplication();"
+        "app.includeStandardAdditions=true;"
+        f"app.displayAlert('{APP_NAME}',{{message:'{MESSAGE}',"
+        "as:'critical',buttons:['OK'],defaultButton:'OK'});"
+    )
+    return [osascript, "-l", "JavaScript", "-e", script]
+
+
+def show_system_notification() -> None:
+    if sys.platform == "win32":
+        command = windows_notification_command()
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    elif sys.platform == "darwin":
+        command = macos_notification_command()
+        creation_flags = 0
+    else:
+        raise RuntimeError("ExitSimulator supports only Windows and macOS.")
+
+    subprocess.Popen(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creation_flags,
+    )
+
+
+def create_window() -> tk.Tk:
+    window = tk.Tk()
+    window.title(APP_NAME)
+    window.resizable(False, False)
+    configure_system_theme(window)
+
+    window.columnconfigure(0, weight=1)
+    window.rowconfigure(0, weight=1)
+
+    content = ttk.Frame(window, padding=20)
+    content.grid(row=0, column=0, sticky="nsew")
+    content.columnconfigure(0, weight=1)
+    content.rowconfigure(0, weight=1)
+    content.rowconfigure(3, weight=1)
+
+    label = ttk.Label(content, text=INSTRUCTION, anchor="center")
+    label.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+
+    def exit_clicked() -> None:
+        try:
+            show_system_notification()
+        except (OSError, RuntimeError) as error:
+            print(f"{APP_NAME} notification error: {error}", file=sys.stderr)
+        window.destroy()
+
+    button = ttk.Button(content, text="Exit", command=exit_clicked)
+    button.grid(row=2, column=0)
+
+    center_window(window)
+    return window
+
+
+def main() -> int:
+    if sys.platform not in {"win32", "darwin"}:
+        print("ExitSimulator supports only Windows and macOS.", file=sys.stderr)
+        return 1
+
+    enable_windows_dpi_awareness()
+    try:
+        window = create_window()
+        window.mainloop()
+    except tk.TclError as error:
+        print(f"{APP_NAME} GUI error: {error}", file=sys.stderr)
+        return 1
     return 0
 
 
-def show_window() -> bool:
-    """Show the small native window and report whether Exit was clicked."""
-    if sys.platform == "win32":
-        return windows_powershell(
-            "Add-Type -AssemblyName System.Windows.Forms;"
-            "$f=New-Object System.Windows.Forms.Form;"
-            "$f.Text='ExitSimulator';"
-            "$f.ClientSize=New-Object System.Drawing.Size(300,150);"
-            "$f.StartPosition='CenterScreen';"
-            "$f.FormBorderStyle='FixedDialog';"
-            "$f.MaximizeBox=$false;"
-            "$f.ShowIcon=$false;"
-            "$l=New-Object System.Windows.Forms.Label;"
-            "$l.Text='Click the button below to exit.';"
-            "$l.TextAlign='MiddleCenter';"
-            "$l.Size=New-Object System.Drawing.Size(240,20);"
-            "$l.Location=New-Object System.Drawing.Point(30,38);"
-            "$b=New-Object System.Windows.Forms.Button;"
-            "$b.Text='Exit';"
-            "$b.Size=New-Object System.Drawing.Size(100,36);"
-            "$b.Location=New-Object System.Drawing.Point(100,76);"
-            "$clicked=$false;"
-            "$b.Add_Click({$script:clicked=$true;$f.Close()});"
-            "$f.Controls.Add($l);"
-            "$f.Controls.Add($b);"
-            "$f.AcceptButton=$b;"
-            "[void]$f.ShowDialog();"
-            "if($clicked){exit 0}else{exit 1}",
-            wait=True,
-        ) == 0
-
-    if sys.platform == "darwin":
-        swift = shutil.which("swift")
-        if not swift:
-            return False
-        script = """
-import AppKit
-import Darwin
-
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    var window: NSWindow!
-    var clicked = false
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 300, height: 150),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "ExitSimulator"
-        window.delegate = self
-
-        let label = NSTextField(labelWithString: "Click the button below to exit.")
-        label.frame = NSRect(x: 30, y: 88, width: 240, height: 18)
-        label.alignment = .center
-        label.font = NSFont.systemFont(ofSize: 12)
-
-        let button = NSButton(
-            title: "Exit",
-            target: self,
-            action: #selector(exitClicked(_:))
-        )
-        button.frame = NSRect(x: 100, y: 42, width: 100, height: 32)
-
-        window.contentView?.addSubview(label)
-        window.contentView?.addSubview(button)
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    @objc func exitClicked(_ sender: Any?) {
-        clicked = true
-        Darwin.exit(0)
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        if !clicked { Darwin.exit(1) }
-    }
-
-    func applicationShouldTerminate(
-        _ sender: NSApplication
-    ) -> NSApplication.TerminateReply {
-        Darwin.exit(clicked ? 0 : 1)
-    }
-}
-
-let app = NSApplication.shared
-app.setActivationPolicy(.regular)
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
-"""
-        return subprocess.run([swift, "-e", script], check=False, **DEVNULL).returncode == 0
-
-    if sys.platform.startswith("linux"):
-        if shutil.which("xmessage"):
-            command = [
-                "xmessage", "-center", "-geometry", "300x150",
-                "-buttons", "Exit:0", "-default", "Exit", INSTRUCTION,
-            ]
-        elif shutil.which("zenity"):
-            command = [
-                "zenity", "--question", f"--title={APP_NAME}",
-                f"--text={INSTRUCTION}", "--ok-label=Exit",
-                "--cancel-label=Cancel", "--width=300", "--height=150",
-            ]
-        else:
-            raise RuntimeError("Linux requires xmessage or zenity to show the window.")
-        return subprocess.run(command, check=False, **DEVNULL).returncode == 0
-
-    raise RuntimeError(f"Unsupported operating system: {sys.platform}")
-
-
-def notify() -> None:
-    """Start an English error notification without delaying application exit."""
-    try:
-        if sys.platform == "win32":
-            windows_powershell(
-                "Add-Type -AssemblyName System.Windows.Forms;"
-                "$n=New-Object System.Windows.Forms.NotifyIcon;"
-                "$n.Icon=[System.Drawing.SystemIcons]::Error;"
-                "$n.BalloonTipTitle='ExitSimulator';"
-                "$n.BalloonTipText='ExitSimulator is eating a hamburger now and will exit immediately.';"
-                "$n.BalloonTipIcon='Error';"
-                "$n.Visible=$true;"
-                "$n.ShowBalloonTip(4000);"
-                "Start-Sleep -Seconds 4;"
-                "$n.Dispose()",
-                wait=False,
-            )
-        elif sys.platform == "darwin":
-            swift = shutil.which("swift")
-            if not swift:
-                return
-            script = f'''import AppKit
-let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
-app.activate(ignoringOtherApps: true)
-let alert = NSAlert()
-alert.alertStyle = .critical
-alert.messageText = "{APP_NAME}"
-alert.informativeText = "{MESSAGE}"
-alert.addButton(withTitle: "OK")
-alert.runModal()
-'''
-            subprocess.Popen([swift, "-e", script], **DEVNULL)
-        elif sys.platform.startswith("linux"):
-            subprocess.Popen(
-                [
-                    "notify-send", f"--app-name={APP_NAME}",
-                    "--urgency=critical", "--icon=dialog-error",
-                    APP_NAME, MESSAGE,
-                ],
-                **DEVNULL,
-            )
-    except OSError:
-        pass
-
-
-def main() -> None:
-    if show_window():
-        notify()
-
-
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

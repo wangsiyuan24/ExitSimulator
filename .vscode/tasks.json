@@ -19,7 +19,7 @@
                 "kind": "build",
                 "isDefault": true
             },
-            "detail": "直接运行跨平台 Python 版本的 ExitSimulator。"
+            "detail": "使用 Python 3 和标准库 Tkinter 运行 Windows/macOS 版 ExitSimulator。"
         }
     ]
 }
